@@ -33,7 +33,7 @@ image = (
     .apt_install("git")
     .pip_install(
         "torch",
-        "transformers>=4.45",
+        "transformers>=4.45,<5",
         "safetensors>=0.4",
         "accelerate>=0.30",
         "huggingface_hub>=0.24",

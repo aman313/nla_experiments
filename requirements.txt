@@ -10,7 +10,7 @@ pytest>=7.4
 
 # ── Target model + activation extraction (GPU, Tier 1+) ──────────────────────
 torch>=2.2
-transformers>=4.45
+transformers>=4.45,<5      # kitft NLA recipe targets transformers 4.x
 safetensors>=0.4
 accelerate>=0.30
 huggingface_hub>=0.24
