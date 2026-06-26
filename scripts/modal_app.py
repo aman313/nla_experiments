@@ -362,7 +362,9 @@ def m2_run(n_label: int = 300, max_per_class: int = 80, n_av: int = 6,
     from nla_sycophancy.io.schema import Bucket, VariantKind
     from nla_sycophancy.nla.ar_client import ARClient
     from nla_sycophancy.nla.av_transformers import TransformersAV
-    from nla_sycophancy.nla.explain import explain_activation, fve_weighted_dimensions
+    from nla_sycophancy.nla.explain import (
+        fve_weighted_dimensions, sample_explanations, score_explanations,
+    )
     from nla_sycophancy.target.extract import ResidualExtractor
     from nla_sycophancy.target.label import label_item
     from nla_sycophancy.judge.grade import JudgeModel, zero_dims
@@ -410,22 +412,35 @@ def m2_run(n_label: int = 300, max_per_class: int = 80, n_av: int = 6,
             "prompt_text": inc_v.prompt,
             "switch_p": lab.switch_to_user_wrong_p,
         })
-    del model
+    # Free the target fully — the extractor holds refs to the model, so drop it
+    # too (otherwise `del model` can't reclaim the weights).
+    import gc
+
+    del extractor, model
+    gc.collect()
     torch.cuda.empty_cache()
     records = syco + nons
     print(f"[m2] class items: {len(syco)} sycophantic, {len(nons)} non-sycophantic")
 
-    # ── Phase 2: AV N_av sampling + AR FVE ────────────────────────────────────
+    # ── Phase 2a: AV N_av sampling (AV resident alone) ────────────────────────
     av = TransformersAV(_snapshot(AV_CKPT), device="cuda")
+    for rec in records:
+        rec["texts"] = sample_explanations(
+            av, rec["activation"], n_av=n_av, temperature=1.0, max_new_tokens=160,
+        )
+    del av
+    gc.collect()
+    torch.cuda.empty_cache()
+
+    # ── Phase 2b: AR FVE scoring (AR resident alone) ──────────────────────────
     ar = ARClient(_snapshot(AR_CKPT), device="cuda")
     for rec in records:
-        es = explain_activation(
-            av, ar, rec["activation"], activation_id=rec["item_id"],
-            n_av=n_av, temperature=1.0, fve_floor=fve_floor,
-            fve_denominator=0.7335,
+        rec["es"] = score_explanations(
+            ar, rec["activation"], rec["texts"], activation_id=rec["item_id"],
+            fve_floor=fve_floor, fve_denominator=0.7335,
         )
-        rec["es"] = es
-    del av, ar
+    del ar
+    gc.collect()
     torch.cuda.empty_cache()
     all_fves = [f for r in records for f in r["es"].fves]
     print(f"[m2] explanations: {len(all_fves)} total; "

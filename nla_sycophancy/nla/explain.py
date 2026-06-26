@@ -65,6 +65,40 @@ class ExplanationSet:
         return [x / s for x in w]
 
 
+def sample_explanations(
+    av,
+    activation: np.ndarray,
+    *,
+    n_av: int = 8,
+    temperature: float = 1.0,
+    max_new_tokens: int = 160,
+) -> list[str]:
+    """AV-only: sample ``n_av`` explanations for one activation."""
+    return av.verbalize_batch(
+        [activation] * n_av, temperature=temperature, max_new_tokens=max_new_tokens
+    )
+
+
+def score_explanations(
+    ar,
+    activation: np.ndarray,
+    texts: Sequence[str],
+    *,
+    activation_id: str = "",
+    fve_floor: float = 0.3,
+    fve_denominator: float = 0.7335,
+) -> ExplanationSet:
+    """AR-only: score each AV explanation against the activation (FVE/MSE)."""
+    es = ExplanationSet(activation_id=activation_id, fve_floor=fve_floor)
+    for t in texts:
+        mse, cos = ar.score(t, activation)
+        es.texts.append(t)
+        es.mses.append(mse)
+        es.coss.append(cos)
+        es.fves.append(fve_nrm(mse, fve_denominator))
+    return es
+
+
 def explain_activation(
     av,
     ar,
@@ -77,18 +111,20 @@ def explain_activation(
     fve_floor: float = 0.3,
     fve_denominator: float = 0.7335,
 ) -> ExplanationSet:
-    """Sample ``n_av`` AV explanations and score each with the AR critic."""
-    texts = av.verbalize_batch(
-        [activation] * n_av, temperature=temperature, max_new_tokens=max_new_tokens
+    """Sample ``n_av`` AV explanations and score each with the AR critic.
+
+    Convenience for when AV+AR are both resident; for tight GPU memory use
+    :func:`sample_explanations` then :func:`score_explanations` in separate
+    phases so only one model is loaded at a time.
+    """
+    texts = sample_explanations(
+        av, activation, n_av=n_av, temperature=temperature,
+        max_new_tokens=max_new_tokens,
     )
-    es = ExplanationSet(activation_id=activation_id, fve_floor=fve_floor)
-    for t in texts:
-        mse, cos = ar.score(t, activation)
-        es.texts.append(t)
-        es.mses.append(mse)
-        es.coss.append(cos)
-        es.fves.append(fve_nrm(mse, fve_denominator))
-    return es
+    return score_explanations(
+        ar, activation, texts, activation_id=activation_id,
+        fve_floor=fve_floor, fve_denominator=fve_denominator,
+    )
 
 
 def fve_weighted_dimensions(
