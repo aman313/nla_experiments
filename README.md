@@ -26,6 +26,9 @@ suggested wrong option.
    causal test, reliability heuristics, pre-registration, and caveats.
 3. [`docs/03_implementation_plan.md`](docs/03_implementation_plan.md) — repo
    layout, dependencies, schemas, milestones, compute budget, testing, risks.
+4. [`docs/04_testing_and_modal.md`](docs/04_testing_and_modal.md) — tiered testing
+   strategy, running all GPU stages on Modal (app shape, GPU sizing, secrets),
+   and what's needed to operate it that way.
 
 ## Core question
 
