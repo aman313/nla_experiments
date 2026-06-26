@@ -94,6 +94,15 @@ def test_golden_fve_relation_holds():
         assert abs(expected - t.fve_nrm) < 5e-3
 
 
+def test_golden_decode_text_captured():
+    g = meta.parse_golden_example(GOLDEN)
+    # every in-distribution token should have a non-empty decode explanation
+    ind = g.in_distribution_tokens(min_index=24)
+    assert all(len(t.decode_text) > 20 for t in ind)
+    # decode text must not leak the next token's header
+    assert all("mse_nrm=" not in t.decode_text for t in g.tokens)
+
+
 def test_golden_indistribution_filter_skips_system_prompt():
     g = meta.parse_golden_example(GOLDEN)
     ind = g.in_distribution_tokens(min_index=24)

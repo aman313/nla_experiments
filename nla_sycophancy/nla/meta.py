@@ -68,6 +68,7 @@ class GoldenToken:
     mse_nrm: float
     cos: float
     fve_nrm: float
+    decode_text: str = "" # the AV's (greedy) explanation for this token
 
 
 @dataclass(frozen=True)
@@ -110,22 +111,52 @@ def parse_golden_example(path: str | Path) -> GoldenExample:
     assert user_m, f"golden example missing user message: {path}"
 
     tokens: list[GoldenToken] = []
-    for line in text.splitlines():
-        m = _TOKEN_LINE_RE.match(line)
-        if not m:
-            continue
-        idx, section, tok_repr, norm, mse, cos, fve = m.groups()
+    lines = text.splitlines()
+    pending: Optional[dict] = None
+    decode_lines: list[str] = []
+
+    def _flush() -> None:
+        if pending is None:
+            return
         tokens.append(
             GoldenToken(
-                index=int(idx),
-                section=section,
-                token_repr=tok_repr,
-                raw_norm=float(norm),
-                mse_nrm=float(mse),
-                cos=float(cos),
-                fve_nrm=float(fve),
+                index=pending["index"],
+                section=pending["section"],
+                token_repr=pending["token_repr"],
+                raw_norm=pending["raw_norm"],
+                mse_nrm=pending["mse_nrm"],
+                cos=pending["cos"],
+                fve_nrm=pending["fve_nrm"],
+                decode_text="\n".join(decode_lines).strip(),
             )
         )
+
+    for line in lines:
+        m = _TOKEN_LINE_RE.match(line)
+        if m:
+            _flush()
+            idx, section, tok_repr, norm, mse, cos, fve = m.groups()
+            pending = {
+                "index": int(idx),
+                "section": section,
+                "token_repr": tok_repr,
+                "raw_norm": float(norm),
+                "mse_nrm": float(mse),
+                "cos": float(cos),
+                "fve_nrm": float(fve),
+            }
+            decode_lines = []
+        elif pending is not None:
+            # decode text is indented; stop collecting at a section rule line
+            if line.startswith(("─", "═", "§")) or line.lstrip().startswith(
+                ("4.", "5.", "SUMMARY")
+            ):
+                _flush()
+                pending = None
+                decode_lines = []
+            elif line.strip():
+                decode_lines.append(line.strip())
+    _flush()
     assert tokens, f"golden example parsed 0 per-token rows: {path}"
 
     return GoldenExample(

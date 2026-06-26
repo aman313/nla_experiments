@@ -27,8 +27,9 @@ nla_sycophancy/
   nla/       meta.py  av_client.py  ar_client.py
   analysis/  stats.py
   io/        schema.py  cache.py
+  nla/       meta.py  av_client.py  av_transformers.py  ar_client.py
   vendor/    nla_inference.py (kitft/nla-inference, Apache-2.0) + examples/
-scripts/     modal_app.py (GPU), run_m0_golden.py, run_m1_pilot.py
+scripts/     modal_app.py (Modal GPU app: golden gate, smoke test, M1 pilot)
 tests/       Tier-0 CPU tests
 ```
 
