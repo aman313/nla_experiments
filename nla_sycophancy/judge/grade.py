@@ -33,13 +33,17 @@ class JudgeModel:
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         self.model_id = model_id
-        self.tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+        # trust_remote_code=False: use transformers' native model class. The
+        # bundled remote modeling files for some checkpoints (e.g. Phi-3.5) lag
+        # behind the installed transformers and break generation (DynamicCache).
+        self.tokenizer = AutoTokenizer.from_pretrained(model_id)
         if self.tokenizer.pad_token_id is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         # Left-pad for batched decoder generation.
         self.tokenizer.padding_side = "left"
         self.model = AutoModelForCausalLM.from_pretrained(
-            model_id, torch_dtype=getattr(torch, dtype), trust_remote_code=True,
+            model_id, torch_dtype=getattr(torch, dtype),
+            attn_implementation="eager",
         ).to(device).eval()
         self.device = device
 
