@@ -1,0 +1,14 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.cache/
+# data / artifacts (content-addressed cache, downloaded datasets, model weights)
+data_cache/
+artifacts/
+opentriviaqa/
+results/
+*.parquet
+*.npy
