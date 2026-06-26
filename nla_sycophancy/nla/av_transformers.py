@@ -83,6 +83,12 @@ class TransformersAV:
         )
         return injected.to(self._embed_layer.weight.dtype)
 
+    def _extract(self, text: str, extract_explanation: bool) -> str:
+        if not extract_explanation:
+            return text
+        m = EXPLANATION_RE.search(text)
+        return m.group(1).strip() if m else text
+
     def verbalize(
         self,
         activation: np.ndarray,
@@ -108,7 +114,41 @@ class TransformersAV:
             out = self.model.generate(**gen_kwargs)
         # With inputs_embeds, generate() returns only the new tokens.
         text = self.tokenizer.decode(out[0], skip_special_tokens=True)
-        if not extract_explanation:
-            return text
-        m = EXPLANATION_RE.search(text)
-        return m.group(1).strip() if m else text
+        return self._extract(text, extract_explanation)
+
+    def verbalize_batch(
+        self,
+        activations,
+        *,
+        temperature: float = 1.0,
+        max_new_tokens: int = 200,
+        extract_explanation: bool = True,
+    ) -> list[str]:
+        """Verbalize many activations in one ``generate`` call.
+
+        The AV prompt is a fixed-length template with a single injection slot, so
+        all activations produce identical-shape ``inputs_embeds`` and batch
+        cleanly (only the injected row differs). Used for N_av sampling and for
+        scanning many activations efficiently.
+        """
+        import torch
+
+        if len(activations) == 0:
+            return []
+        embeds = torch.cat(
+            [self._build_inputs_embeds(a) for a in activations], dim=0
+        )
+        attn = torch.ones(embeds.shape[:2], dtype=torch.long, device=self.device)
+        do_sample = temperature > 0
+        gen_kwargs = dict(
+            inputs_embeds=embeds, attention_mask=attn,
+            max_new_tokens=max_new_tokens,
+            pad_token_id=self.tokenizer.eos_token_id,
+            do_sample=do_sample,
+        )
+        if do_sample:
+            gen_kwargs["temperature"] = temperature
+        with torch.no_grad():
+            out = self.model.generate(**gen_kwargs)
+        texts = self.tokenizer.batch_decode(out, skip_special_tokens=True)
+        return [self._extract(t, extract_explanation) for t in texts]

@@ -11,6 +11,7 @@ sycophancy** labels? This repo implements the experiment plan in
 |---|---|---|
 | **M0** — Harness & validation | sidecar/tokenizer contract, residual extraction, golden-MSE gate, smoke test | implemented; CPU tests green, GPU golden gate runs on Modal |
 | **M1** — Dataset & labels | OpenTriviaQA load+filter, counterfactual variants, per-option-logprob rollouts, sycophancy labeling + attrition, pilot | implemented; CPU tests green, pilot runs on Modal |
+| **M2** — NLA + judge pipeline | AV N_av sampling, AR FVE gating, independent judge rubric, initial Exp-1 alignment | implemented; **initial result: NLA `D_agreement` AUROC ≈ 0.74 vs sycophancy label** (`docs/06_m2_results.md`) |
 
 The reference paper (arXiv:2509.21344, *"Linear probes rely on textual
 evidence"*, following Kirch et al. 2026) uses **OpenTriviaQA** for its sycophancy
