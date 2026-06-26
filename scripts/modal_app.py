@@ -192,9 +192,7 @@ def _golden_reply_text(path: Path) -> str:
     import re
 
     text = Path(path).read_text()
-    m = re.search(
-        r"BASE MODEL REPLY.*?\n[-]+\n+\s*\"(.*?)\"\s*\n", text, re.DOTALL
-    )
+    m = re.search(r'BASE MODEL REPLY.*?\n\s*"(.*?)"', text, re.DOTALL)
     assert m, "could not locate base-model reply in golden example"
     return m.group(1)
 
