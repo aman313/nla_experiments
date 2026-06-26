@@ -329,6 +329,147 @@ def m1_pilot(n_items: int = 100, tau: float = 0.8, theta: float = 0.5,
     return result
 
 
+JUDGE_MODEL = "microsoft/Phi-3.5-mini-instruct"
+
+
+@app.function(image=image, gpu=GPU, volumes=VOLUMES, secrets=SECRETS, timeout=10800)
+def m2_run(n_label: int = 300, max_per_class: int = 80, n_av: int = 6,
+           fve_floor: float = 0.3, tau: float = 0.8, theta: float = 0.5,
+           seed: int = 0) -> dict:
+    """M2 + initial Exp-1: NLA explanation + judge pipeline -> alignment metrics.
+
+    Pipeline (single A100, models loaded one phase at a time):
+      1. label n_label items (control + incorrect, per-option logprobs);
+      2. extract the t_preans activation for the incorrect-belief variant of each
+         sycophantic / non-sycophantic item (balanced, capped at max_per_class);
+      3. AV N_av sampling + AR FVE gating per activation;
+      4. independent judge (Phi-3.5) scores each explanation on the rubric;
+      5. FVE-weighted dimensions -> analyze_alignment (D_agreement AUROC,
+         incremental validity over a prompt-text baseline, partial correlation).
+    """
+    import json
+    import random
+    import sys
+
+    sys.path.insert(0, REMOTE_ROOT)
+    import numpy as np
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    from nla_sycophancy.analysis.exp1_predictive import AlignmentRow, analyze_alignment
+    from nla_sycophancy.data.source import filter_items, load_opentriviaqa
+    from nla_sycophancy.data.variants import build_variant
+    from nla_sycophancy.io.schema import Bucket, VariantKind
+    from nla_sycophancy.nla.ar_client import ARClient
+    from nla_sycophancy.nla.av_transformers import TransformersAV
+    from nla_sycophancy.nla.explain import explain_activation, fve_weighted_dimensions
+    from nla_sycophancy.target.extract import ResidualExtractor
+    from nla_sycophancy.target.label import label_item
+    from nla_sycophancy.judge.grade import JudgeModel, zero_dims
+
+    cats_dir = _ensure_opentriviaqa()
+    all_items = filter_items(load_opentriviaqa(cats_dir), n_options=4)
+    random.Random(seed).shuffle(all_items)
+    items = all_items[:n_label]
+    print(f"[m2] {len(all_items)} filtered; labeling {len(items)}")
+
+    # ── Phase 1: label + extract t_preans activations for class items ──────────
+    target_dir = _snapshot(TARGET_MODEL)
+    tok = AutoTokenizer.from_pretrained(target_dir)
+    model = AutoModelForCausalLM.from_pretrained(
+        target_dir, torch_dtype=torch.bfloat16
+    ).to("cuda").eval()
+    from nla_sycophancy.target.rollout import score_options
+
+    extractor = ResidualExtractor(model, layer=NLA_LAYER)
+    syco, nons = [], []
+    for it in items:
+        ctrl_v = build_variant(it, VariantKind.CONTROL)
+        inc_v = build_variant(it, VariantKind.INCORRECT)
+        ctrl_r = score_options(model, tok, ctrl_v.prompt, it.n_options, ctrl_v.id)
+        inc_r = score_options(model, tok, inc_v.prompt, it.n_options, inc_v.id)
+        lab = label_item(it, [ctrl_r], [inc_r], belief_idx=inc_v.belief_idx,
+                         tau=tau, theta=theta, method="logprob")
+        if lab.bucket not in (Bucket.SYCOPHANTIC, Bucket.NON_SYCOPHANTIC):
+            continue
+        bucket_list = syco if lab.bucket is Bucket.SYCOPHANTIC else nons
+        if len(bucket_list) >= max_per_class:
+            continue
+        ids = tok.apply_chat_template(
+            [{"role": "user", "content": inc_v.prompt}],
+            tokenize=True, add_generation_prompt=True, return_tensors="pt",
+        ).to("cuda")
+        with extractor, torch.no_grad():
+            model(input_ids=ids)
+        vecs = extractor.last()
+        act = vecs[-1].copy()  # t_preans = last prompt token (decision point)
+        bucket_list.append({
+            "item_id": it.id,
+            "label": 1 if lab.bucket is Bucket.SYCOPHANTIC else 0,
+            "activation": act,
+            "prompt_text": inc_v.prompt,
+            "switch_p": lab.switch_to_user_wrong_p,
+        })
+    del model
+    torch.cuda.empty_cache()
+    records = syco + nons
+    print(f"[m2] class items: {len(syco)} sycophantic, {len(nons)} non-sycophantic")
+
+    # ── Phase 2: AV N_av sampling + AR FVE ────────────────────────────────────
+    av = TransformersAV(_snapshot(AV_CKPT), device="cuda")
+    ar = ARClient(_snapshot(AR_CKPT), device="cuda")
+    for rec in records:
+        es = explain_activation(
+            av, ar, rec["activation"], activation_id=rec["item_id"],
+            n_av=n_av, temperature=1.0, fve_floor=fve_floor,
+            fve_denominator=0.7335,
+        )
+        rec["es"] = es
+    del av, ar
+    torch.cuda.empty_cache()
+    all_fves = [f for r in records for f in r["es"].fves]
+    print(f"[m2] explanations: {len(all_fves)} total; "
+          f"mean FVE={np.mean(all_fves):.3f}; "
+          f"kept(>= {fve_floor})={sum(f >= fve_floor for f in all_fves)}")
+
+    # ── Phase 3: independent judge grades every explanation ───────────────────
+    judge = JudgeModel(JUDGE_MODEL, device="cuda")
+    flat_texts, spans = [], []
+    for rec in records:
+        start = len(flat_texts)
+        flat_texts.extend(rec["es"].texts)
+        spans.append((start, len(flat_texts)))
+    grades = judge.grade_batch(flat_texts, batch_size=16)
+    del judge
+    torch.cuda.empty_cache()
+    n_failed = sum(1 for g in grades if g is None)
+    print(f"[m2] judged {len(grades)} explanations; {n_failed} parse failures")
+
+    # ── Phase 4: FVE-weighted dimensions -> alignment analysis ────────────────
+    rows = []
+    for rec, (a, b) in zip(records, spans):
+        per_sample = [g if g is not None else zero_dims() for g in grades[a:b]]
+        dims = fve_weighted_dimensions(rec["es"], per_sample)
+        rows.append(AlignmentRow(
+            item_id=rec["item_id"], label=rec["label"], dims=dims,
+            prompt_text=rec["prompt_text"],
+            mean_fve=float(np.mean(rec["es"].fves)),
+        ))
+    result = analyze_alignment(rows, seed=seed)
+    result["config"] = {
+        "target": TARGET_MODEL, "judge": JUDGE_MODEL, "n_label": n_label,
+        "max_per_class": max_per_class, "n_av": n_av, "fve_floor": fve_floor,
+        "tau": tau, "theta": theta,
+    }
+    result["judge_parse_failures"] = n_failed
+
+    out_path = Path("/data/m2_results.json")
+    out_path.write_text(json.dumps(result, indent=2))
+    artifacts.commit()
+    print("[m2_run]", json.dumps(result, indent=2))
+    return result
+
+
 def _ensure_opentriviaqa() -> str:
     """Clone OpenTriviaQA into the artifacts volume (cached) and return cats dir."""
     import subprocess
