@@ -1,0 +1,18 @@
+# Target model + NLA checkpoints for the build/iterate + golden-test target.
+# Qwen2.5-7B is ungated (no HF_TOKEN required) and is the cheapest NLA target,
+# matching the Tier-1 golden-MSE gate in docs/04_testing_and_modal.md.
+
+name: qwen2.5-7b
+target_model: Qwen/Qwen2.5-7B-Instruct
+target_revision: main
+d_model: 3584
+nla_layer: 20                 # residual stream output of block 20 (= hidden_states[21])
+
+nla:
+  av_checkpoint: kitft/nla-qwen2.5-7b-L20-av
+  ar_checkpoint: kitft/nla-qwen2.5-7b-L20-ar
+  injection_scale: 150.0      # authoritative value lives in each ckpt's nla_meta.yaml
+  embed_scale: 1.0            # 1.0 for Qwen/Llama; sqrt(d) for Gemma-3
+  fve_denominator: 0.7335     # Var(v_nrm) of training set (predict-the-mean baseline)
+
+gated: false

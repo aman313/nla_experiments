@@ -1,37 +1,55 @@
 # nla_experiments
 
-Research design for testing whether **Natural Language Autoencoder (NLA)**
-explanations of LLM activations are *faithful* to **counterfactual sycophancy
-labels**.
+Are NLA (Natural Language Autoencoder) explanations faithful to **counterfactual
+sycophancy** labels? This repo implements the experiment plan in
+[`docs/`](docs/) — see `02_final_experiment_plan.md` for the science and
+`03_implementation_plan.md` for the engineering milestones.
 
-NLAs (Fraser-Taliente, Kantamneni, Ong et al., *Transformer Circuits*, 2026;
-code: [`kitft/natural_language_autoencoders`](https://github.com/kitft/natural_language_autoencoders),
-inference: [`kitft/nla-inference`](https://github.com/kitft/nla-inference))
-translate residual-stream activations into natural language via an activation
-verbalizer (AV) and back via an activation reconstructor (AR). The counterfactual
-sycophancy labeling methodology follows
-[arXiv:2509.21344](https://arxiv.org/pdf/2509.21344) (and Kirch et al.):
-control / user-suggests-correct / user-suggests-incorrect variants, labeling an
-item sycophantic when the model abandons a correct control answer for the user's
-suggested wrong option.
+## Status
 
-## Documents
+| Milestone | Scope | State |
+|---|---|---|
+| **M0** — Harness & validation | sidecar/tokenizer contract, residual extraction, golden-MSE gate, smoke test | implemented; CPU tests green, GPU golden gate runs on Modal |
+| **M1** — Dataset & labels | OpenTriviaQA load+filter, counterfactual variants, per-option-logprob rollouts, sycophancy labeling + attrition, pilot | implemented; CPU tests green, pilot runs on Modal |
 
-1. [`docs/01_critique.md`](docs/01_critique.md) — issues found in the first-draft
-   plan (model availability, prompt leakage, confounds, statistics, causal-test
-   pitfalls).
-2. [`docs/02_final_experiment_plan.md`](docs/02_final_experiment_plan.md) — the
-   revised plan: within-incorrect-belief primary contrast, incremental validity
-   over a prompt-text baseline, placebo specificity, dose–response, AR-steering
-   causal test, reliability heuristics, pre-registration, and caveats.
-3. [`docs/03_implementation_plan.md`](docs/03_implementation_plan.md) — repo
-   layout, dependencies, schemas, milestones, compute budget, testing, risks.
-4. [`docs/04_testing_and_modal.md`](docs/04_testing_and_modal.md) — tiered testing
-   strategy, running all GPU stages on Modal (app shape, GPU sizing, secrets),
-   and what's needed to operate it that way.
+The reference paper (arXiv:2509.21344, *"Linear probes rely on textual
+evidence"*, following Kirch et al. 2026) uses **OpenTriviaQA** for its sycophancy
+scenario; M1 uses the same source and the same control / correct-belief /
+incorrect-belief counterfactual construction.
 
-## Core question
+## Layout
 
-Not merely *"can NLA explanations predict the sycophancy label?"* — which prompt
-leakage can satisfy trivially — but *"do they surface the internal disposition
-that causes the switch, beyond what is readable from the prompt text?"*
+```
+configs/                 model + experiment YAML (Qwen2.5-7B is the default target)
+nla_sycophancy/
+  data/      source.py (OpenTriviaQA)   variants.py (counterfactual variants)
+  target/    rollout.py  label.py  extract.py
+  nla/       meta.py  av_client.py  ar_client.py
+  analysis/  stats.py
+  io/        schema.py  cache.py
+  vendor/    nla_inference.py (kitft/nla-inference, Apache-2.0) + examples/
+scripts/     modal_app.py (GPU), run_m0_golden.py, run_m1_pilot.py
+tests/       Tier-0 CPU tests
+```
+
+## Quick start (CPU / Tier-0)
+
+```bash
+python -m virtualenv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/python -m pytest -q          # Tier-0 unit tests (no GPU, no network)
+```
+
+## GPU work (Modal)
+
+All GPU stages (target rollouts, activation extraction, AV inference, AR
+reconstruction) run on [Modal](https://modal.com). Set `MODAL_TOKEN_ID` /
+`MODAL_TOKEN_SECRET` (and `HF_TOKEN` for gated Gemma/Llama targets; Qwen is
+ungated), then:
+
+```bash
+modal run scripts/modal_app.py::golden_mse_gate     # M0 golden-MSE plumbing gate
+modal run scripts/modal_app.py::smoke_test          # M0 5-item end-to-end smoke
+modal run scripts/modal_app.py::m1_pilot            # M1 pilot rollouts + attrition
+```
+
+See `docs/04_testing_and_modal.md` for the full testing tiers and Modal recipe.
