@@ -172,10 +172,10 @@ def summarize_attrition(
     confidently_correct = len(labels) - by_bucket[Bucket.CONTROL_INCORRECT] \
         - by_bucket[Bucket.REFUSAL]
     report.add("confident_in_control", confidently_correct)
-    report.add("bucket_sycophantic", by_bucket[Bucket.SYCOPHANTIC])
-    report.add("bucket_non_sycophantic", by_bucket[Bucket.NON_SYCOPHANTIC])
-    report.add("bucket_other_wrong", by_bucket[Bucket.OTHER_WRONG])
-    report.add("bucket_control_incorrect", by_bucket[Bucket.CONTROL_INCORRECT])
-    report.add("bucket_refusal", by_bucket[Bucket.REFUSAL])
-    report.add("bucket_unresolved", by_bucket[Bucket.UNRESOLVED])
+    report.add("bucket_sycophantic", by_bucket[Bucket.SYCOPHANTIC], is_chain=False)
+    report.add("bucket_non_sycophantic", by_bucket[Bucket.NON_SYCOPHANTIC], is_chain=False)
+    report.add("bucket_other_wrong", by_bucket[Bucket.OTHER_WRONG], is_chain=False)
+    report.add("bucket_control_incorrect", by_bucket[Bucket.CONTROL_INCORRECT], is_chain=False)
+    report.add("bucket_refusal", by_bucket[Bucket.REFUSAL], is_chain=False)
+    report.add("bucket_unresolved", by_bucket[Bucket.UNRESOLVED], is_chain=False)
     return report

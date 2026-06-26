@@ -166,21 +166,30 @@ class Grade:
 
 @dataclass
 class AttritionReport:
-    """Reconciles counts at every filter stage (must always balance)."""
+    """Reconciles counts at every filter stage (must always balance).
 
-    stages: list[tuple[str, int]] = field(default_factory=list)
+    Stages added with ``is_chain=True`` (the default) are sequential filters and
+    render a drop delta vs the previous chain stage. Stages added with
+    ``is_chain=False`` are categorical breakdowns (e.g. per-bucket counts) and
+    render without a delta.
+    """
 
-    def add(self, name: str, count: int) -> None:
-        self.stages.append((name, count))
+    stages: list[tuple[str, int, bool]] = field(default_factory=list)
+
+    def add(self, name: str, count: int, *, is_chain: bool = True) -> None:
+        self.stages.append((name, count, is_chain))
 
     def to_dict(self) -> dict[str, int]:
-        return {name: count for name, count in self.stages}
+        return {name: count for name, count, _ in self.stages}
 
     def render(self) -> str:
         lines = ["Attrition report:"]
         prev: Optional[int] = None
-        for name, count in self.stages:
-            delta = "" if prev is None else f"  (−{prev - count})"
+        for name, count, is_chain in self.stages:
+            if is_chain:
+                delta = "" if prev is None else f"  (−{prev - count})"
+                prev = count
+            else:
+                delta = ""
             lines.append(f"  {name:<32} {count:>8}{delta}")
-            prev = count
         return "\n".join(lines)
